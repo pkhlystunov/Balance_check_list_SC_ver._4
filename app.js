@@ -1,5 +1,4 @@
-// НА СТРОКЕ 2 УКАЖИТЕ ССЫЛКУ, КОТОРУЮ ВАМ ВЫДАЛ GOOGLE APPS SCRIPT ПРИ ДЕПЛОЕ:
-const API_URL = "https://script.google.com/macros/s/AKfycbzc8Bs2D0WvwjlXQBACVEk7QThoCYilHv28mj8EqPtkFsAqBAGHC6dLtcDP98pc6Bcy_Q/exec"; 
+const API_URL = "https://script.google.com/macros/s/AKfycbxeaNDEA2HlRvvW4zqVZlsJqC2WumUCU83puD-YbDKjrgUR71_kel9I7ky1iIH9vQgLhQ/exec"; 
 
 let auditSession = { inspector: '', objectName: '', contractor: '', results: [] };
 let historyRecords = []; 
@@ -16,12 +15,12 @@ window.addEventListener('offline', updateNetworkStatus);
 function updateNetworkStatus() {
     const indicator = document.getElementById('net-indicator');
     if (navigator.onLine) {
-        indicator.textContent = "Режим: Онлайн (Данные пишутся в облако)";
+        indicator.textContent = "🌐 Режим: Онлайн (Данные пишутся в облако)";
         indicator.className = "network-status online-mode";
         syncOfflineQueue();
         loadAnalyticsData(); 
     } else {
-        indicator.textContent = "Режим: Офлайн (Данные сохраняются на телефон)";
+        indicator.textContent = "⚠️ Режим: Офлайн (Данные сохраняются на телефон)";
         indicator.className = "network-status offline-mode";
     }
 }
@@ -72,13 +71,13 @@ function toggleMenu() {
 async function loadAnalyticsData() {
     if (!navigator.onLine) return;
     try {
-        const response = await fetch(API_URL + "?action=getAnalytics");
+        const response = await fetch(API_URL + "?action=getAnalytics", { method: "GET", redirect: "follow" });
         const res = await response.json();
         if (res.success) {
             historyRecords = res.data;
             calculateAnalytics();
         }
-    } catch (e) { console.log("Ошибка аналитики: ", e); }
+    } catch (e) { console.log(e); }
 }
 
 function calculateAnalytics() {
@@ -94,6 +93,7 @@ function calculateAnalytics() {
     let totalChecks = 0; let totalViolations = 0; let contractorMap = {};
 
     historyRecords.forEach(function(r) {
+        if (!r.date) return;
         const rDate = new Date(r.date);
         if (start && rDate < start) return;
         if (end && rDate > end) return;
@@ -216,6 +216,9 @@ function renderGroupedChecklist(data) {
             const commentInp = document.createElement('input'); commentInp.type = 'text'; commentInp.id = 'comment-' + q.id; commentInp.className = 'comment-box'; commentInp.placeholder = 'Опишите детали нарушения...';
             card.appendChild(commentInp);
             
+            const dateInp = document.createElement('input'); dateInp.type = 'date'; dateInp.id = 'date-limit-' + q.id; dateInp.className = 'comment-box'; dateInp.style.marginTop = '8px'; dateInp.style.display = 'none';
+            card.appendChild(dateInp);
+            
             const photoContainer = document.createElement('div'); photoContainer.className = 'photo-input-container'; photoContainer.id = 'photo-area-' + q.id; photoContainer.style.display = 'none';
             photoContainer.innerHTML = '<label style="margin-top:5px; font-size:13px; color:#555;">Прикрепить фото дефекта (до 4-х штук):</label>' +
                                        '<input type="file" id="file-' + q.id + '" accept="image/*" multiple style="font-size:13px;" onchange="handlePhotoUpload(this, ' + q.id + ')">' +
@@ -254,18 +257,21 @@ function handlePhotoUpload(input, questionId) {
             img.src = event.target.result;
         };
         reader.readAsDataURL(file);
-    });
+});
 }
 function setResult(id, status, question, category, normative) {
     let item = auditSession.results.find(function(r) { return r.id === id; });
     if (!item) {
-        item = { id: id, question: question, category: category, normative: normative, status: status, comment: '', photos: [] };
+        item = { id: id, question: question, category: category, normative: normative, status: status, comment: '', deadLine: '', photos: [] };
         auditSession.results.push(item);
     } else { item.status = status; }
     
     const comp = document.getElementById('comment-' + id);
+    const dateLimit = document.getElementById('date-limit-' + id);
     const photoArea = document.getElementById('photo-area-' + id);
+    
     if (comp) comp.style.display = status === 'Нарушение' ? 'block' : 'none';
+    if (dateLimit) dateLimit.style.display = status === 'Нарушение' ? 'block' : 'none';
     if (photoArea) photoArea.style.display = status === 'Нарушение' ? 'block' : 'none';
     
     document.getElementById('q-box-' + id).style.borderLeftColor = status === 'Соответствует' ? 'var(--success)' : 'var(--danger)';
@@ -275,19 +281,36 @@ async function submitAuditWithOffline() {
     if (auditSession.results.length === 0) return alert("Вы не ответили ни на один вопрос!");
     
     const violations = [];
+    let hasEmptyDates = false;
+
     auditSession.results.forEach(function(item) {
-        const inputField = document.getElementById('comment-' + item.id);
-        if (inputField) item.comment = inputField.value.trim() || "не расписано";
-        
         if (item.status === 'Нарушение') {
+            const inputField = document.getElementById('comment-' + item.id);
+            const dateField = document.getElementById('date-limit-' + item.id);
+            
+            if (inputField) item.comment = inputField.value.trim() || "не расписано";
+            
+            if (dateField && dateField.value) {
+                const dParts = dateField.value.split('-'); 
+                item.deadLine = dParts[2] + '.' + dParts[1] + '.' + dParts[0]; 
+            } else {
+                item.deadLine = "";
+                hasEmptyDates = true;
+            }
+            
             let line = '• [' + item.category + '] ' + item.question;
             if (item.normative) line += ' (Норматив: ' + item.normative + ')';
-            line += '\n  Замечание: ' + item.comment;
+            line += '\n  Замечание: ' + item.comment + ' (Срок устранения: ' + (item.deadLine || "не указан") + ')';
             violations.push(line);
         }
     });
 
-    auditSession.aggregatedViolations = violations.length > 0 ? violations.join("\n\n") : "Нарушений в ходе проверки не выявлено. Объект соответствует нормам ОТиПБ.";
+    if (hasEmptyDates) {
+        return alert("⚠️ Блокировка: Вы зафиксировали нарушение, но не указали для него дату устранения в календаре!");
+    }
+
+    finalViolationsText = violations.length > 0 ? violations.join("\n\n") : "Нарушений в ходе проверки не выявлено. Объект соответствует нормам ОТиПБ.";
+    auditSession.aggregatedViolations = finalViolationsText;
 
     const btn = document.getElementById('submit-btn');
     btn.disabled = true;
@@ -324,11 +347,10 @@ async function syncOfflineQueue() {
         } catch (e) { return; }
     }
     localStorage.removeItem('offline_audit_queue');
-    alert("🔄 Обнаружен интернет: офлайн-акты успешно переданы в Google!");
+    alert("🔄 Обнаружен internet: офлайн-акты успешно переданы в Google!");
     loadAnalyticsData();
 }
 
-// НАДЕЖНЫЙ СИСТЕМНЫЙ ВЫЗОВ НА ТИВНОЙ ПЕЧАТИ WINDOW.PRINT()
 function downloadChecklistPdf() {
     const currentDateStr = new Date().toLocaleDateString('ru-RU');
     
@@ -377,7 +399,7 @@ function downloadChecklistPdf() {
             const cComm = row.insertCell();
             cComm.style.border = "1px solid #ddd"; cComm.style.padding = "8px"; cComm.style.fontSize = "13px";
             cComm.style.color = "#b33939"; cComm.style.backgroundColor = "#fdf2f2";
-            cComm.textContent = item.comment;
+            cComm.innerHTML = item.comment + '<br><span style="color:#d35400; font-weight:bold; font-size:11px;">⏱️ Срок до: ' + item.deadLine + '</span>';
         });
     }
 
@@ -441,17 +463,30 @@ function downloadChecklistPdf() {
         }
     }
 
-    // Запуск системной печати. Никаких выводов на страницу!
-    window.print();
-    
-    setTimeout(function() {
-        if (confirm("Выгрузка завершена! Начать новую проверку?")) {
-            location.reload();
-        }
-    }, 1000);
-}
+    const printElement = document.getElementById('print-blank-zone');
+    printElement.style.display = 'block';
 
-function backToStep1() { 
-    document.getElementById('step-3-checklist').style.display = 'none'; 
-    document.getElementById('step-1-form').style.display = 'block'; 
+    const pdfOptions = {
+        margin: 10,
+        filename: 'Акт_ОТ_' + auditSession.objectName.replace(/[^a-zA-Z0-9а-яА-Я_]/g, "_") + '_' + currentDateStr + '.pdf',
+        image: { type: 'jpeg', quality: 0.95 },
+        html2canvas: { scale: 1.5, useCORS: true, logging: false },
+jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+};
+html2pdf().set(pdfOptions).from(printElement).save().then(function() {
+printElement.style.display = 'none';
+document.getElementById('pdf-btn').disabled = false;
+if (confirm("Акт успешно скачан как PDF-файл! Очистить форму для новой проверки?")) {
+location.reload();
+}
+}).catch(function(err) {
+console.error(err);
+printElement.style.display = 'none';
+alert("Ошибка сборки PDF.");
+});
+}
+function backToStep1() {
+document.getElementById('step-3-checklist').style.display = 'none';
+document.getElementById('step-1-form').style.display = 'block';
 }
